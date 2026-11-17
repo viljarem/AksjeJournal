@@ -1,0 +1,76 @@
+name: Oppdater kurser
+
+# Henter kurser etter børsslutt og lagrer Parquet-filer i Supabase Storage.
+# GitHub bruker UTC og kjenner ikke sommertid, så hvert marked har to tidspunkter.
+# Steget «Velg marked» slipper bare gjennom det som stemmer med norsk tid akkurat nå.
+on:
+  schedule:
+    - cron: "5 15 * * 1-5" # Oslo 17:05, sommertid
+    - cron: "5 16 * * 1-5" # Oslo 17:05, vintertid
+    - cron: "5 17 * * 1-5" # Stockholm 19:05, sommertid
+    - cron: "5 18 * * 1-5" # Stockholm 19:05, vintertid
+    - cron: "5 21 * * 1-5" # USA 23:05, sommertid
+    - cron: "5 22 * * 1-5" # USA 23:05, vintertid
+  workflow_dispatch:
+    inputs:
+      market:
+        description: Marked som skal oppdateres
+        type: choice
+        default: all
+        options: [all, oslo, stockholm, sp500]
+
+concurrency:
+  group: update-prices
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Velg marked
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_MARKET: ${{ inputs.market }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            market="$INPUT_MARKET"
+          else
+            offset=$(TZ=Europe/Oslo date +%z)
+            case "$SCHEDULE" in
+              "5 15 * * 1-5") market=oslo;      want="+0200" ;;
+              "5 16 * * 1-5") market=oslo;      want="+0100" ;;
+              "5 17 * * 1-5") market=stockholm; want="+0200" ;;
+              "5 18 * * 1-5") market=stockholm; want="+0100" ;;
+              "5 21 * * 1-5") market=sp500;     want="+0200" ;;
+              "5 22 * * 1-5") market=sp500;     want="+0100" ;;
+              *) echo "Ukjent tidsplan: $SCHEDULE"; exit 1 ;;
+            esac
+            if [ "$offset" != "$want" ]; then
+              echo "Hopper over: $SCHEDULE gjelder ikke for tidssone $offset."
+              market=""
+            fi
+          fi
+          echo "market=$market" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        if: steps.plan.outputs.market != ''
+
+      - uses: actions/setup-python@v7
+        if: steps.plan.outputs.market != ''
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Installer pakker
+        if: steps.plan.outputs.market != ''
+        run: pip install -r requirements.txt
+
+      - name: Oppdater kurser og screening
+        if: steps.plan.outputs.market != ''
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -m scripts.update_prices --market "${{ steps.plan.outputs.market }}" --require-supabase

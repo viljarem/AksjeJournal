@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+
+# Hemmeligheter
+.streamlit/secrets.toml
+
+# Lokal mellomlagring av kursdata (fasit ligger i Supabase Storage)
+data/
+
+# Testverktøy brukt under utvikling
+scratch/

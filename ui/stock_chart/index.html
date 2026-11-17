@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/css/stocktools/gui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/css/annotations/popup.css">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; font-family: "Source Sans Pro", "Source Sans", system-ui, sans-serif; }
+  #chart { width: 100%; }
+  #status { height: 24px; line-height: 24px; font-size: 13px; padding-left: 48px; opacity: 0.75; }
+  #status.error { color: #dc2626; opacity: 1; }
+  #fatal { padding: 24px; font-size: 15px; }
+</style>
+</head>
+<body>
+<div id="chart"></div>
+<div id="status"></div>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/highstock.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/drag-panes.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/annotations-advanced.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/price-indicator.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/stock-tools.js"></script>
+<script>
+(function () {
+  const ICONS = "https://cdn.jsdelivr.net/npm/highcharts@12.6.2/gfx/stock-icons/";
+  const UP = "#16a34a", DOWN = "#dc2626", AMBER = "#d97706", BLUE = "#2563eb";
+  const statusEl = document.getElementById("status");
+
+  let chart = null;        // gjeldende Highcharts-graf
+  let chartKey = null;     // hvilke data grafen er bygget fra
+  let ticker = null;
+  let canSave = false;
+  let lastSaved = "[]";    // tegningene slik de sist ble sendt til lagring
+  let pendingNonce = null; // lagring vi venter bekreftelse på
+  let mouseDown = false;
+
+  function send(type, data) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data || {}), "*");
+  }
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.className = isError ? "error" : "";
+  }
+
+  function num(value, decimals) {
+    return Number(value).toLocaleString("nb-NO", {
+      minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+    });
+  }
+
+  function day(ms) {
+    return new Date(ms).toLocaleDateString("nb-NO", { timeZone: "UTC" });
+  }
+
+  function drawings() {
+    return chart.annotations.map(function (annotation) { return annotation.userOptions; });
+  }
+
+  function palette(theme) {
+    const dark = !!theme && theme.base === "dark";
+    return {
+      dark: dark,
+      bg: (theme && theme.backgroundColor) || (dark ? "#0e1117" : "#ffffff"),
+      text: (theme && theme.textColor) || (dark ? "#fafafa" : "#31333f"),
+      grid: dark ? "#262b36" : "#e9ecf1",
+      line: dark ? "#3a4150" : "#cfd4dc",
+      panel: (theme && theme.secondaryBackgroundColor) || (dark ? "#262730" : "#f0f2f6"),
+    };
+  }
+
+  function buildChart(args, theme) {
+    const p = palette(theme);
+    const root = document.documentElement;
+    root.classList.toggle("highcharts-dark", p.dark);
+    root.classList.toggle("highcharts-light", !p.dark);
+    root.style.setProperty("--highcharts-background-color", p.bg);
+    root.style.setProperty("--highcharts-neutral-color-3", p.panel);
+    root.style.setProperty("--highcharts-neutral-color-10", p.line);
+    root.style.setProperty("--highcharts-neutral-color-20", p.line);
+    document.body.style.color = p.text;
+    document.getElementById("chart").style.height = args.height + "px";
+
+    const lastX = args.ohlc[args.ohlc.length - 1][0];
+    const label = { style: { color: p.text } };
+
+    const series = [
+      {
+        type: "candlestick", id: "price", name: args.title, data: args.ohlc, showInLegend: false,
+        color: DOWN, lineColor: DOWN, upColor: UP, upLineColor: UP, zIndex: 3,
+      },
+      { type: "line", name: "SMA50", data: args.sma50, color: BLUE, lineWidth: 1.3, zIndex: 2 },
+      { type: "line", name: "SMA150", data: args.sma150, color: AMBER, lineWidth: 1.3, zIndex: 2 },
+      { type: "line", name: "SMA200", data: args.sma200, color: "#9333ea", lineWidth: 1.3, zIndex: 2 },
+      { type: "line", id: "pivots", name: "Pivoter", data: [], color: p.text },
+    ];
+
+    // Én kort vannrett strek per brutt pivot: fra pivot-toppen til bruddagen.
+    args.breakouts.forEach(function (b) {
+      series.push({
+        type: "line", linkedTo: "pivots", data: [[b.pivot_x, b.pivot], [b.x, b.pivot]],
+        color: b.with_volume ? UP : AMBER, lineWidth: 1.5, enableMouseTracking: false, zIndex: 4,
+      });
+    });
+    if (args.active_pivot) {
+      series.push({
+        type: "line", linkedTo: "pivots", dashStyle: "Dash", color: p.text, lineWidth: 1.5,
+        enableMouseTracking: false, zIndex: 4,
+        data: [[args.active_pivot.x, args.active_pivot.price], [lastX, args.active_pivot.price]],
+        dataLabels: {
+          enabled: true, align: "right", verticalAlign: "bottom", y: -2,
+          style: { color: p.text, textOutline: "none", fontWeight: "600" },
+          formatter: function () {
+            return this.x === lastX ? "Pivot " + num(args.active_pivot.price, 2) : null;
+          },
+        },
+      });
+    }
+
+    function breakoutFlags(withVolume) {
+      return args.breakouts.filter(function (b) { return b.with_volume === withVolume; }).map(function (b) {
+        return {
+          x: b.x, title: "B",
+          text: "<b>Brudd " + (withVolume ? "med" : "uten") + " volum</b><br>Over pivot " + num(b.pivot, 2) +
+            " fra " + day(b.pivot_x) + "<br>Relativt volum: " + num(b.rel_vol, 2),
+        };
+      });
+    }
+    series.push({
+      type: "flags", name: "Brudd med volum", onSeries: "price", shape: "circlepin", data: breakoutFlags(true),
+      color: UP, fillColor: UP, style: { color: "#ffffff" }, width: 14, zIndex: 6,
+    });
+    series.push({
+      type: "flags", name: "Brudd uten volum", onSeries: "price", shape: "circlepin", data: breakoutFlags(false),
+      color: AMBER, fillColor: p.bg, style: { color: AMBER }, width: 14, zIndex: 5,
+    });
+
+    // 7/7-perioder: grønt bånd i bakgrunnen og flagg ved start og slutt.
+    // Bygges på nytt ved hver bruk: Highcharts endrer listen den får når bånd fjernes.
+    function templateBands() {
+      return args.periods.map(function (period) {
+        return { id: "template", from: period[0], to: period[1] === null ? lastX : period[1], color: "rgba(22,163,74,0.10)" };
+      });
+    }
+    const templateFlags = [];
+    args.periods.forEach(function (period) {
+      templateFlags.push({ x: period[0], title: "7/7", text: "<b>7/7 oppfylt</b><br>Fra " + day(period[0]), fillColor: UP, color: UP });
+      if (period[1] !== null) {
+        templateFlags.push({ x: period[1], title: "✕", text: "<b>Ikke lenger 7/7</b><br>Fra " + day(period[1]), fillColor: DOWN, color: DOWN });
+      }
+    });
+    templateFlags.sort(function (a, b) { return a.x - b.x; });
+    series.push({
+      type: "flags", name: "7/7-perioder", shape: "squarepin", data: templateFlags, color: UP,
+      style: { color: "#ffffff" }, y: -28, zIndex: 5,
+      events: {
+        hide: function () { this.chart.xAxis[0].removePlotBand("template"); },
+        show: function () {
+          const axis = this.chart.xAxis[0];
+          axis.removePlotBand("template");
+          templateBands().forEach(function (band) { axis.addPlotBand(band); });
+        },
+      },
+    });
+
+    series.push({
+      type: "column", name: "Volum", yAxis: 1, showInLegend: false, turboThreshold: 0,
+      data: args.volume.map(function (v) { return { x: v[0], y: v[1], color: v[2] ? UP : DOWN }; }),
+    });
+
+    Highcharts.setOptions({
+      lang: {
+        rangeSelectorZoom: "",
+        months: ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "desember"],
+        shortMonths: ["jan", "feb", "mar", "apr", "mai", "jun", "jul", "aug", "sep", "okt", "nov", "des"],
+        weekdays: ["søndag", "mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag"],
+      },
+    });
+
+    chart = Highcharts.stockChart("chart", {
+      chart: { backgroundColor: p.bg, height: args.height, animation: false, style: { fontFamily: "inherit" } },
+      credits: { enabled: false },
+      navigation: { iconsURL: ICONS },
+      stockTools: {
+        gui: {
+          enabled: true, iconsURL: ICONS,
+          buttons: ["lines", "crookedLines", "simpleShapes", "measure", "advanced", "verticalLabels",
+            "separator", "toggleAnnotations", "zoomChange", "typeChange", "currentPriceIndicator"],
+        },
+      },
+      rangeSelector: {
+        selected: 2, inputEnabled: false,
+        buttons: [
+          { type: "month", count: 3, text: "3m" }, { type: "month", count: 6, text: "6m" },
+          { type: "year", count: 1, text: "1 år" }, { type: "year", count: 2, text: "2 år" },
+          { type: "all", text: "Alt" },
+        ],
+        buttonTheme: {
+          width: 40, fill: p.panel, stroke: "none", r: 4, style: { color: p.text },
+          states: {
+            hover: { fill: p.line, style: { color: p.text } },
+            select: { fill: BLUE, style: { color: "#ffffff", fontWeight: "600" } },
+          },
+        },
+      },
+      legend: { enabled: true, itemStyle: { color: p.text, fontWeight: "normal" }, itemHoverStyle: { color: p.text }, itemHiddenStyle: { color: p.line } },
+      navigator: { maskFill: "rgba(37,99,235,0.15)", outlineColor: p.line, xAxis: { gridLineColor: p.grid, labels: label }, series: { color: BLUE, lineColor: BLUE } },
+      scrollbar: { enabled: false },
+      xAxis: { plotBands: templateBands(), lineColor: p.line, tickColor: p.line, labels: label, crosshair: { color: p.line } },
+      yAxis: [
+        { height: "76%", labels: Object.assign({ align: "left", x: 6 }, label), gridLineColor: p.grid, resize: { enabled: true, lineColor: p.line }, crosshair: { color: p.line, snap: false } },
+        { top: "79%", height: "21%", labels: Object.assign({ align: "left", x: 6 }, label), gridLineColor: p.grid },
+      ],
+      tooltip: { split: true, valueDecimals: 2, backgroundColor: p.bg, borderColor: p.line, style: { color: p.text } },
+      plotOptions: {
+        series: { animation: false, dataGrouping: { enabled: false }, marker: { enabled: false } },
+        flags: { useHTML: false, states: { hover: { fillColor: undefined } } },
+      },
+      series: series,
+    });
+
+    (args.annotations || []).forEach(function (options) {
+      try { chart.addAnnotation(options); } catch (error) { console.warn("Kunne ikke gjenopprette tegning", error); }
+    });
+    lastSaved = JSON.stringify(drawings());
+    pendingNonce = null;
+    setStatus(canSave ? "Tegninger lagres automatisk." : "Tegninger lagres ikke – Supabase er ikke koblet til.");
+    send("streamlit:setFrameHeight", { height: args.height + 26 });
+  }
+
+  function onRender(event) {
+    const args = event.data.args;
+    ticker = args.ticker;
+    canSave = !!args.can_save;
+    if (typeof Highcharts === "undefined") {
+      document.body.innerHTML = '<div id="fatal">Kunne ikke laste Highcharts. Sjekk nettforbindelsen og last siden på nytt.</div>';
+      send("streamlit:setFrameHeight", { height: 80 });
+      return;
+    }
+    if (chart === null || chartKey !== args.chart_key) {
+      if (chart) { chart.destroy(); chart = null; }
+      chartKey = args.chart_key;
+      buildChart(args, event.data.theme);
+    }
+    if (pendingNonce !== null && args.saved_nonce === pendingNonce) {
+      pendingNonce = null;
+      setStatus("Tegninger lagret kl. " + new Date().toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" }) + ".");
+    } else if (pendingNonce !== null && args.error_nonce === pendingNonce) {
+      pendingNonce = null;
+      setStatus("Kunne ikke lagre tegningene. Endringen er ikke lagret.", true);
+    }
+  }
+
+  // Lagrer automatisk når tegningene er endret (sjekkes når musa ikke holdes nede).
+  function autosave() {
+    if (!chart || !canSave || mouseDown) { return; }
+    const current = JSON.stringify(drawings());
+    if (current === lastSaved) { return; }
+    lastSaved = current;
+    pendingNonce = Date.now() + "-" + Math.random().toString(36).slice(2);
+    setStatus("Lagrer tegninger …");
+    send("streamlit:setComponentValue", {
+      value: { ticker: ticker, nonce: pendingNonce, annotations: JSON.parse(current) },
+      dataType: "json",
+    });
+  }
+
+  document.addEventListener("mousedown", function () { mouseDown = true; }, true);
+  document.addEventListener("mouseup", function () { mouseDown = false; }, true);
+  document.addEventListener("touchstart", function () { mouseDown = true; }, true);
+  document.addEventListener("touchend", function () { mouseDown = false; }, true);
+  setInterval(autosave, 700);
+
+  window.addEventListener("message", function (event) {
+    if (event.data && event.data.type === "streamlit:render") { onRender(event); }
+  });
+  send("streamlit:componentReady", { apiVersion: 1 });
+})();
+</script>
+</body>
+</html>
