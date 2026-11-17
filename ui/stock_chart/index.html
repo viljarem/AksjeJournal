@@ -69,6 +69,28 @@
     };
   }
 
+  // Highcharts tegner som standard i svart, som ikke synes på mørk bakgrunn. Her byttes alle
+  // mørke standardfarger for tegninger ut med en farge som passer temaet. Farger du velger
+  // selv i tegningens innstillinger, beholdes.
+  const DARK_DEFAULT = /^(rgba\(0, 0, 0, 0\.75\)|#000000|#333333|#666666|black)$/;
+  let drawingSlots = null;
+
+  function applyDrawingColor(p) {
+    const color = p.dark ? "#22d3ee" : "#0e7490";
+    const fill = p.dark ? "rgba(34,211,238,0.18)" : "rgba(14,116,144,0.15)";
+    if (drawingSlots === null) {
+      drawingSlots = [];
+      (function walk(node) {
+        Object.keys(node).forEach(function (key) {
+          const value = node[key];
+          if (value && typeof value === "object") { walk(value); }
+          else if (typeof value === "string" && DARK_DEFAULT.test(value)) { drawingSlots.push([node, key]); }
+        });
+      })(Highcharts.getOptions().annotations);
+    }
+    drawingSlots.forEach(function (slot) { slot[0][slot[1]] = slot[1] === "fill" ? fill : color; });
+  }
+
   function buildChart(args, theme) {
     const p = palette(theme);
     const root = document.documentElement;
@@ -167,6 +189,10 @@
       type: "column", name: "Volum", yAxis: 1, showInLegend: false, turboThreshold: 0,
       data: args.volume.map(function (v) { return { x: v[0], y: v[1], color: v[2] ? UP : DOWN }; }),
     });
+    series.push({
+      type: "line", name: "Volum SMA50", yAxis: 1, data: args.vol_sma50 || [], color: "#f59e0b",
+      lineWidth: 1.3, zIndex: 2, tooltip: { valueDecimals: 0 },
+    });
 
     Highcharts.setOptions({
       lang: {
@@ -176,6 +202,8 @@
         weekdays: ["søndag", "mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag"],
       },
     });
+
+    applyDrawingColor(p);
 
     chart = Highcharts.stockChart("chart", {
       chart: { backgroundColor: p.bg, height: args.height, animation: false, style: { fontFamily: "inherit" } },

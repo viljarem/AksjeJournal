@@ -38,6 +38,7 @@ def chart_payload(analysis: Analysis) -> dict:
         "sma50": _line(x, frame["sma50"]),
         "sma150": _line(x, frame["sma150"]),
         "sma200": _line(x, frame["sma200"]),
+        "vol_sma50": [[xi, round(float(v))] for xi, v in zip(x, frame["vol_sma50"]) if pd.notna(v)],
         "breakouts": [
             {
                 "x": _ms(b.date),
