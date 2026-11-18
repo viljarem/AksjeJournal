@@ -117,9 +117,9 @@ def universe() -> pd.DataFrame:
     for market in config.MARKETS:
         screen = load_screen(market)
         if screen is not None:
-            frames.append(screen[["ticker", "symbol", "name", "close", "date"]].assign(market=market))
+            frames.append(screen[["ticker", "symbol", "name", "close", "chg_1d", "date"]].assign(market=market))
     if not frames:
-        return pd.DataFrame(columns=["symbol", "name", "close", "date", "market"])
+        return pd.DataFrame(columns=["symbol", "name", "close", "chg_1d", "date", "market"])
     return pd.concat(frames, ignore_index=True).drop_duplicates("ticker").set_index("ticker")
 
 

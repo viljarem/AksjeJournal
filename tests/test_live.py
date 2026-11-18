@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.prices import with_quote
+from core.prices import fresh_quote, with_quote
 from core.screener import apply_quotes
 
 
@@ -38,6 +38,18 @@ def test_with_quote_replaces_same_day_and_ignores_older_or_missing():
     assert with_quote(history(), quote("2026-11-13"))["close"].tolist() == [10.5, 11.5]
     assert with_quote(history(), None)["close"].tolist() == [10.5, 11.5]
     assert with_quote(history(), quote("2026-11-17", last=np.nan))["close"].tolist() == [10.5, 11.5]
+
+
+def test_fresh_quote_rejects_quotes_older_than_stored_history():
+    quotes = pd.DataFrame(
+        {"last": [6.0, np.nan], "date": pd.to_datetime(["2026-11-16", "2026-11-17"])}, index=["PSE.OL", "X"]
+    )
+    assert fresh_quote(quotes, "PSE.OL", pd.Timestamp("2026-11-17")) is None  # lagret er nyere
+    assert fresh_quote(quotes, "PSE.OL", pd.Timestamp("2026-11-16"))["last"] == 6.0
+    assert fresh_quote(quotes, "PSE.OL", None)["last"] == 6.0  # ukjent aksje: bruk kursen
+    assert fresh_quote(quotes, "X", None) is None  # uten kurs
+    assert fresh_quote(quotes, "FINNESIKKE", None) is None
+    assert fresh_quote(None, "PSE.OL", None) is None
 
 
 def screen():

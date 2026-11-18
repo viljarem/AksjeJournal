@@ -111,6 +111,22 @@ def with_quote(history: pd.DataFrame, quote: pd.Series | None) -> pd.DataFrame:
     return pd.concat([base, today], ignore_index=True)
 
 
+def fresh_quote(quotes: pd.DataFrame | None, ticker: str, stored_date=None) -> pd.Series | None:
+    """Kursen for tickeren, eller None hvis den mangler eller er eldre enn lagret historikk.
+
+    Yahoo mangler av og til siste børsdag i dagshistorikken (typisk før børsåpning).
+    Da er den lagrede sluttkursen nyere og skal brukes i stedet.
+    """
+    if quotes is None or ticker not in quotes.index:
+        return None
+    quote = quotes.loc[ticker]
+    if pd.isna(quote["last"]) or pd.isna(quote["date"]):
+        return None
+    if stored_date is not None and pd.notna(stored_date) and pd.Timestamp(quote["date"]) < pd.Timestamp(stored_date):
+        return None
+    return quote
+
+
 def fetch_quotes(tickers: Sequence[str]) -> pd.DataFrame:
     """Siste kurs for et lite utvalg tickere (forsinket ca. 15 minutter hos Yahoo).
 

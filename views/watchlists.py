@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from core import db
-from core.prices import fetch_quotes
+from core.prices import fetch_quotes, fresh_quote
 from ui.common import nb, open_chart, pct, pct_color, require_supabase, symbol, ticker_picker, universe
 
 st.title("Watchlister")
@@ -105,15 +105,18 @@ def quote_table() -> None:
     rows = []
     for item in items:
         ticker = item["ticker"]
-        quote = live.loc[ticker] if ticker in live.index else None
-        fallback = stocks.loc[ticker, "close"] if ticker in stocks.index else None
+        known = ticker in stocks.index
+        # Er Yahoo-kursen eldre enn lagret historikk, brukes lagret sluttkurs og dagsendring.
+        quote = fresh_quote(live, ticker, stocks.loc[ticker, "date"] if known else None)
+        fallback = stocks.loc[ticker, "close"] if known else None
+        stored_change = stocks.loc[ticker, "chg_1d"] if known else None
         rows.append(
             {
                 "Ticker": symbol(ticker, stocks),
                 "Navn": stocks.loc[ticker, "name"] if ticker in stocks.index else "",
                 "Siste": quote["last"] if quote is not None else fallback,
                 "Siden åpning": quote["chg_open"] if quote is not None else None,
-                "I dag": quote["chg_day"] if quote is not None else None,
+                "I dag": quote["chg_day"] if quote is not None else stored_change,
                 "Kommentar": item["comment"],
             }
         )
@@ -129,7 +132,7 @@ def quote_table() -> None:
         selection_mode="single-row",
         column_config={
             "Siden åpning": st.column_config.Column(help="Siste kurs mot dagens åpningskurs."),
-            "I dag": st.column_config.Column(help="Siste kurs mot forrige sluttkurs."),
+            "I dag": st.column_config.Column(help="Siste kurs mot forrige sluttkurs. Før børsåpning vises endringen siste børsdag."),
             "Kommentar": st.column_config.Column(width="large"),
         },
         key=f"watchlist-table-{list_id}-{st.session_state.get('table_nonce', 0)}",
