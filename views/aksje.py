@@ -61,7 +61,8 @@ with st.expander(f"Trend template: {row['score']} av 7 kriterier oppfylt"):
         st.markdown(f"{icon} {CRITERIA_TEXT[name]}")
 
 drawings = db.get_drawings(ticker) if supabase_configured() else []
-stock_chart(ticker, f"{info['symbol']}", analysis, drawings)
+trades = db.ticker_transactions(ticker) if supabase_configured() else []
+stock_chart(ticker, f"{info['symbol']}", analysis, drawings, trades)
 st.caption(
     "Tegn med verktøyene til venstre i chartet. Klikk på navnene under chartet for å vise eller skjule "
     "glidende snitt, pivoter, brudd (B) og 7/7-perioder (grønt felt)."

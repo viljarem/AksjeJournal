@@ -185,6 +185,28 @@
       },
     });
 
+    // Egne handler: grønn pil opp for kjøp, rød pil ned for salg, på handelskursen.
+    if (args.trades && args.trades.length) {
+      const esc = function (s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); };
+      series.push({
+        type: "scatter", name: "Handler", color: p.text, zIndex: 8, turboThreshold: 0,
+        stickyTracking: false, dataGrouping: { enabled: false },
+        marker: { enabled: true, radius: 7, lineWidth: 1.5, lineColor: p.bg },
+        tooltip: { pointFormatter: function () { return this.text; } },
+        data: args.trades.map(function (t) {
+          const color = t.buy ? UP : DOWN;
+          return {
+            x: t.x, y: t.price, color: color,
+            marker: { symbol: t.buy ? "triangle" : "triangle-down", fillColor: color },
+            text: '<span style="color:' + color + '">\u25CF</span> <b>' + (t.buy ? "Kjøp" : "Salg") + "</b> " + day(t.date) +
+              "<br>" + num(t.quantity, 0) + " stk til " + num(t.price, 2) +
+              (t.fee ? "<br>Kurtasje: " + num(t.fee, 0) : "") +
+              (t.comment ? "<br>" + esc(t.comment) : ""),
+          };
+        }),
+      });
+    }
+
     series.push({
       type: "column", name: "Volum", yAxis: 1, showInLegend: false, turboThreshold: 0,
       data: args.volume.map(function (v) { return { x: v[0], y: v[1], color: v[2] ? UP : DOWN }; }),

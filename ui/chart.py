@@ -60,9 +60,46 @@ def chart_payload(analysis: Analysis) -> dict:
     }
 
 
+def trade_markers(analysis: Analysis, transactions: list[dict]) -> list[dict]:
+    """Kjøp og salg som punkter i chartet, plassert på handelskursen.
+
+    Handler på dager uten børshandel flyttes til neste børsdag, slik at de havner på en kursstolpe.
+    """
+    dates = analysis.frame["date"]
+    markers = []
+    for tx in transactions:
+        when = pd.Timestamp(str(tx["traded_on"])[:10])
+        later = dates[dates >= when]
+        markers.append(
+            {
+                "x": _ms(later.iloc[0] if len(later) else when),
+                "date": _ms(when),
+                "price": float(tx["price"]),
+                "buy": tx["side"] == "buy",
+                "quantity": float(tx["quantity"]),
+                "fee": float(tx.get("fee") or 0),
+                "comment": tx.get("comment") or "",
+            }
+        )
+    return sorted(markers, key=lambda m: m["x"])
+
+
 @st.fragment
-def stock_chart(ticker: str, title: str, analysis: Analysis, annotations: list, height: int = 640) -> None:
+def stock_chart(
+    ticker: str,
+    title: str,
+    analysis: Analysis,
+    annotations: list,
+    transactions: list[dict] | None = None,
+    height: int = 640,
+) -> None:
     """Viser chartet. Tegninger lagres automatisk i Supabase når de endres."""
+    payload = chart_payload(analysis)
+    payload["trades"] = trade_markers(analysis, transactions or [])
+    # Chartet bygges på nytt når handlene endres.
+    payload["chart_key"] += "-" + ",".join(
+        f"{m['x']}:{m['price']}:{m['quantity']}:{m['buy']}:{m['comment']}" for m in payload["trades"]
+    )
     can_save = supabase_configured()
     saved = st.session_state.setdefault("chart_saved_nonce", {})
     failed = st.session_state.setdefault("chart_error_nonce", {})
@@ -77,7 +114,7 @@ def stock_chart(ticker: str, title: str, analysis: Analysis, annotations: list, 
         error_nonce=failed.get(ticker),
         key=f"chart-{ticker}",
         default=None,
-        **chart_payload(analysis),
+        **payload,
     )
 
     if not (can_save and value and value.get("ticker") == ticker):

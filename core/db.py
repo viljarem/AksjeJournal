@@ -112,6 +112,13 @@ def delete_journal_entry(entry_id: int) -> None:
 
 
 # --- Kjøp og salg -------------------------------------------------------------
+def ticker_transactions(ticker: str) -> list[dict]:
+    """Alle kjøp og salg i én aksje, eldste først."""
+    return (
+        _table("transactions").select("*").eq("ticker", ticker).order("traded_on").order("id").execute().data
+    )
+
+
 def list_transactions() -> list[dict]:
     return _table("transactions").select("*").order("traded_on").order("id").execute().data
 
