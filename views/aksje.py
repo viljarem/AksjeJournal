@@ -79,7 +79,8 @@ with menus[1]:
 stock_chart(ticker, f"{info['symbol']}", analysis, drawings, trades, smas, indicators)
 st.caption(
     "Tegn med verktøyene til venstre i chartet. Dra i datoaksen for å strekke eller presse sammen stolpene, "
-    "dra i kursaksen til høyre for å flytte kursen opp/ned (dobbeltklikk der for automatisk skala), "
+    "dra i kursaksen til høyre for å flytte kursen opp/ned, rull eller Shift+dra der for å endre skalaen "
+    "(dobbeltklikk for automatisk skala), "
     "dra i selve chartet for å panorere (også forbi siste kurs), rull for å zoome. "
     "Klikk på navnene under chartet for å vise eller skjule linjer, pivoter, brudd (B) og 7/7-perioder (grønt felt)."
 )

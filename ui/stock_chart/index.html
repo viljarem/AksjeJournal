@@ -12,9 +12,10 @@
   #bar { height: 24px; line-height: 24px; font-size: 13px; padding-left: 48px; display: flex; gap: 12px; align-items: center; }
   #status { opacity: 0.75; flex: 1; }
   #status.error { color: #dc2626; opacity: 1; }
-  #fullscreen { font: inherit; font-size: 12px; line-height: 20px; padding: 0 8px; border-radius: 4px; border: 1px solid currentColor;
+  #fullscreen, #logscale { font: inherit; font-size: 12px; line-height: 20px; padding: 0 8px; border-radius: 4px; border: 1px solid currentColor;
     background: transparent; color: inherit; opacity: 0.75; cursor: pointer; margin-right: 8px; }
-  #fullscreen:hover { opacity: 1; }
+  #fullscreen:hover, #logscale:hover { opacity: 1; }
+  #logscale.on { opacity: 1; font-weight: 600; }
   #fatal { padding: 24px; font-size: 15px; }
   .hc-info { font-size: 12px; line-height: 1.45; white-space: nowrap; }
   .hc-info b { font-weight: 600; }
@@ -24,7 +25,7 @@
 </head>
 <body>
 <div id="chart"></div>
-<div id="bar"><span id="status"></span><button id="fullscreen" type="button" title="Vis grafen i fullskjerm (Esc for å avslutte)">⛶ Fullskjerm</button></div>
+<div id="bar"><span id="status"></span><button id="logscale" type="button" title="Bytt mellom lineær og logaritmisk kursakse">Log</button><button id="fullscreen" type="button" title="Vis grafen i fullskjerm (Esc for å avslutte)">⛶ Fullskjerm</button></div>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/highstock.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/highcharts-more.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/drag-panes.js"></script>
@@ -49,6 +50,7 @@
   let mouseDown = false;
   let baseHeight = 0;      // høyde fra Streamlit (utenfor fullskjerm)
   let fullscreen = false;
+  let logScale = localStorage.getItem("chart_log") === "1";
 
   function send(type, data) {
     window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data || {}), "*");
@@ -293,7 +295,7 @@
     const priceH = 100 - volH - gap - panels.length * (panelH + gap);
     const axisLabel = Object.assign({ align: "left", x: 6 }, label);
     const yAxes = [
-      { height: priceH + "%", labels: axisLabel, gridLineColor: p.grid, startOnTick: false, endOnTick: false, resize: { enabled: true, lineColor: p.line }, crosshair: { color: p.line, snap: false } },
+      { height: priceH + "%", type: logScale ? "logarithmic" : "linear", labels: axisLabel, gridLineColor: p.grid, startOnTick: false, endOnTick: false, resize: { enabled: true, lineColor: p.line }, crosshair: { color: p.line, snap: false } },
       { top: (priceH + gap) + "%", height: volH + "%", labels: axisLabel, gridLineColor: p.grid, resize: { enabled: true, lineColor: p.line } },
     ];
     let top = priceH + gap + volH + gap;
@@ -503,8 +505,9 @@
   });
   window.addEventListener("mouseup", function () { if (axisDrag) { axisDrag = null; chartEl.classList.remove("axis-drag"); } });
 
-  // Dra i kursaksen (høyre marg ved prispanelet) opp/ned for å panorere kursen. Aksen slutter da å
-  // skalere seg automatisk; dobbeltklikk i samme område setter den tilbake til automatisk.
+  // Dra i kursaksen (høyre marg ved prispanelet) opp/ned for å panorere kursen. Shift + dra, eller
+  // rullehjul over aksen, endrer skalaen (strekker/presser kursene). Aksen slutter da å skalere seg
+  // automatisk; dobbeltklikk i samme område setter den tilbake til automatisk.
   let yDrag = null;
   function inYAxisArea(event) {
     if (!chart) { return false; }
@@ -513,6 +516,19 @@
     const axis = chart.yAxis[0];
     return x > chart.plotLeft + chart.plotWidth && x < chart.chartWidth && y >= axis.top && y <= axis.top + axis.len;
   }
+  // Skalerer kursaksen med faktor rundt et punkt (i aksens egne enheter, log-aksen regnes i log10).
+  function scaleYAxis(factor, aroundPx) {
+    const axis = chart.yAxis[0];
+    const ext = axis.getExtremes();
+    const log = axis.logarithmic;
+    const toA = log ? Math.log10 : function (v) { return v; };
+    const fromA = log ? function (v) { return Math.pow(10, v); } : function (v) { return v; };
+    const min = toA(ext.min), max = toA(ext.max);
+    const anchor = aroundPx === undefined ? (min + max) / 2 : toA(axis.toValue(aroundPx, true));
+    const newMin = anchor - (anchor - min) * factor, newMax = anchor + (max - anchor) * factor;
+    if (log && newMin <= -6) { return; }
+    axis.setExtremes(fromA(newMin), fromA(newMax), true, false);
+  }
   chartEl.addEventListener("mousemove", function (event) {
     if (axisDrag || yDrag) { return; }
     chartEl.classList.toggle("yaxis-drag", inYAxisArea(event));
@@ -520,19 +536,47 @@
   chartEl.addEventListener("mousedown", function (event) {
     if (event.button !== 0 || !inYAxisArea(event)) { return; }
     const ext = chart.yAxis[0].getExtremes();
-    yDrag = { startY: event.clientY, min: ext.min, max: ext.max };
+    yDrag = { startY: event.clientY, min: ext.min, max: ext.max, scale: event.shiftKey };
     event.stopPropagation(); event.preventDefault();
   }, true);
   window.addEventListener("mousemove", function (event) {
     if (!yDrag) { return; }
     const axis = chart.yAxis[0];
-    const shift = (event.clientY - yDrag.startY) / axis.len * (yDrag.max - yDrag.min);
-    axis.setExtremes(yDrag.min + shift, yDrag.max + shift, true, false);
+    const dy = event.clientY - yDrag.startY;
+    if (yDrag.scale) {
+      // Dra nedover = strekk ut (større stolper), oppover = press sammen.
+      const log = axis.logarithmic;
+      const toA = log ? Math.log10 : function (v) { return v; };
+      const fromA = log ? function (v) { return Math.pow(10, v); } : function (v) { return v; };
+      const min = toA(yDrag.min), max = toA(yDrag.max), mid = (min + max) / 2;
+      const factor = Math.exp(-dy / 200);
+      axis.setExtremes(fromA(mid - (mid - min) * factor), fromA(mid + (max - mid) * factor), true, false);
+    } else {
+      const shift = dy / axis.len * (yDrag.max - yDrag.min);
+      axis.setExtremes(yDrag.min + shift, yDrag.max + shift, true, false);
+    }
   });
   window.addEventListener("mouseup", function () { if (yDrag) { yDrag = null; chartEl.classList.remove("yaxis-drag"); } });
   chartEl.addEventListener("dblclick", function (event) {
     if (inYAxisArea(event)) { chart.yAxis[0].setExtremes(null, null, true, false); event.stopPropagation(); }
   }, true);
+  chartEl.addEventListener("wheel", function (event) {
+    if (!inYAxisArea(event)) { return; }
+    event.preventDefault(); event.stopPropagation();
+    const rect = chart.container.getBoundingClientRect();
+    scaleYAxis(Math.exp(event.deltaY / 300), event.clientY - rect.top);
+  }, { passive: false, capture: true });
+
+  // Lineær/logaritmisk kursakse. Valget huskes i nettleseren.
+  const logButton = document.getElementById("logscale");
+  function renderLogButton() { logButton.classList.toggle("on", logScale); logButton.textContent = logScale ? "Log ✓" : "Log"; }
+  logButton.addEventListener("click", function () {
+    logScale = !logScale;
+    localStorage.setItem("chart_log", logScale ? "1" : "0");
+    renderLogButton();
+    if (chart) { chart.yAxis[0].update({ type: logScale ? "logarithmic" : "linear", min: null, max: null }, true); }
+  });
+  renderLogButton();
 
   window.addEventListener("message", function (event) {
     if (event.data && event.data.type === "streamlit:render") { onRender(event); }
