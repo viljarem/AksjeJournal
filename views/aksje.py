@@ -6,7 +6,7 @@ import streamlit as st
 from core import db
 from core.indicators import CRITERIA, CRITERIA_TEXT, analyze
 from core.settings import supabase_configured
-from ui.chart import stock_chart
+from ui.chart import sma_editor, stock_chart
 from ui.common import history, load_screen, nb, pct, ticker_picker, universe
 from ui.journal import entry_form, render_entries
 
@@ -62,7 +62,8 @@ with st.expander(f"Trend template: {row['score']} av 7 kriterier oppfylt"):
 
 drawings = db.get_drawings(ticker) if supabase_configured() else []
 trades = db.ticker_transactions(ticker) if supabase_configured() else []
-stock_chart(ticker, f"{info['symbol']}", analysis, drawings, trades)
+smas = sma_editor()
+stock_chart(ticker, f"{info['symbol']}", analysis, drawings, trades, smas)
 st.caption(
     "Tegn med verktøyene til venstre i chartet. Klikk på navnene under chartet for å vise eller skjule "
     "glidende snitt, pivoter, brudd (B) og 7/7-perioder (grønt felt)."

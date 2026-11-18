@@ -151,6 +151,20 @@ def delete_transaction(transaction_id: int) -> None:
 
 
 # --- Tegninger i chart --------------------------------------------------------
+# SMA-oppsettet for chartet ligger i en reservert rad i chart_drawings, så det følger med på tvers av enheter.
+_SMA_ROW = "__sma__"
+
+
+def get_chart_smas() -> list | None:
+    """Lagrede SMA-linjer, eller None hvis ingenting er lagret ennå."""
+    rows = _table("chart_drawings").select("annotations").eq("ticker", _SMA_ROW).execute().data
+    return rows[0]["annotations"] if rows else None
+
+
+def save_chart_smas(smas: list) -> None:
+    save_drawings(_SMA_ROW, smas)
+
+
 def get_drawings(ticker: str) -> list:
     rows = _table("chart_drawings").select("annotations").eq("ticker", ticker).execute().data
     return rows[0]["annotations"] if rows else []

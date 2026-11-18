@@ -35,9 +35,6 @@ def chart_payload(analysis: Analysis) -> dict:
             [x[i], round(o[i], 4), round(h[i], 4), round(l[i], 4), round(c[i], 4)] for i in range(len(x))
         ],
         "volume": [[x[i], v[i], 1 if c[i] >= o[i] else 0] for i in range(len(x))],
-        "sma50": _line(x, frame["sma50"]),
-        "sma150": _line(x, frame["sma150"]),
-        "sma200": _line(x, frame["sma200"]),
         "vol_sma50": [[xi, round(float(v))] for xi, v in zip(x, frame["vol_sma50"]) if pd.notna(v)],
         "breakouts": [
             {
@@ -84,6 +81,55 @@ def trade_markers(analysis: Analysis, transactions: list[dict]) -> list[dict]:
     return sorted(markers, key=lambda m: m["x"])
 
 
+DEFAULT_SMAS = [
+    {"id": 1, "period": 50, "color": "#2563eb"},
+    {"id": 2, "period": 150, "color": "#d97706"},
+    {"id": 3, "period": 200, "color": "#9333ea"},
+]
+
+
+def sma_editor() -> list[dict]:
+    """Meny for å legge til, fjerne og fargelegge SMA-linjer. Returnerer gjeldende oppsett."""
+    state = st.session_state
+    if "smas" not in state:
+        stored = None
+        if supabase_configured():
+            try:
+                stored = db.get_chart_smas()
+            except Exception:
+                stored = None
+        state["smas"] = [dict(s) for s in (DEFAULT_SMAS if stored is None else stored)]
+    smas = state["smas"]
+
+    edited = []
+    with st.popover("Glidende snitt", icon=":material/show_chart:"):
+        for i, sma in enumerate(smas):
+            labels = "visible" if i == 0 else "collapsed"
+            cols = st.columns([3, 1, 1], vertical_alignment="bottom")
+            period = cols[0].number_input(
+                "Periode (dager)", 2, 500, int(sma["period"]), key=f"sma_period_{sma['id']}", label_visibility=labels
+            )
+            color = cols[1].color_picker(
+                "Farge", sma["color"], key=f"sma_color_{sma['id']}", label_visibility=labels
+            )
+            if not cols[2].button("", icon=":material/close:", key=f"sma_remove_{sma['id']}", help="Fjern linja"):
+                edited.append({"id": sma["id"], "period": int(period), "color": color})
+        if st.button("Legg til linje", icon=":material/add:", key="sma_add"):
+            new_id = max([s["id"] for s in smas], default=0) + 1
+            edited.append({"id": new_id, "period": 20, "color": "#22d3ee"})
+        st.caption("Gjelder alle aksjer. Screeningen bruker alltid SMA50, 150 og 200.")
+
+    if edited != smas:
+        state["smas"] = edited
+        if supabase_configured():
+            try:
+                db.save_chart_smas(edited)
+            except Exception as error:
+                st.warning(f"Oppsettet ble ikke lagret: {error}")
+        st.rerun()
+    return smas
+
+
 @st.fragment
 def stock_chart(
     ticker: str,
@@ -91,10 +137,19 @@ def stock_chart(
     analysis: Analysis,
     annotations: list,
     transactions: list[dict] | None = None,
+    smas: list[dict] | None = None,
     height: int = 640,
 ) -> None:
     """Viser chartet. Tegninger lagres automatisk i Supabase når de endres."""
     payload = chart_payload(analysis)
+    smas = DEFAULT_SMAS if smas is None else smas
+    x = [_ms(d) for d in analysis.frame["date"]]
+    close = analysis.frame["close"]
+    payload["smas"] = [
+        {"period": s["period"], "color": s["color"], "data": _line(x, close.rolling(s["period"]).mean())}
+        for s in smas
+    ]
+    payload["chart_key"] += "-" + ",".join(f"{s['period']}{s['color']}" for s in smas)
     payload["trades"] = trade_markers(analysis, transactions or [])
     # Chartet bygges på nytt når handlene endres.
     payload["chart_key"] += "-" + ",".join(
