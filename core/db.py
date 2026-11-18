@@ -89,15 +89,42 @@ def watchlist_comments(ticker: str) -> list[dict]:
 
 
 # --- Journal ------------------------------------------------------------------
-def add_journal_entry(ticker: str, body: str) -> dict:
-    return _insert("journal_entries", {"ticker": ticker, "body": body.strip()})
+_MISSING_IMAGE_COLUMN = (
+    "Kolonnen image_path mangler i journal_entries. Kjør denne setningen i Supabase (SQL Editor): "
+    "alter table public.journal_entries add column if not exists image_path text;"
+)
+
+
+def _lacks_image_column(error: Exception) -> bool:
+    return "image_path" in str(error) and ("42703" in str(error) or "does not exist" in str(error))
+
+
+def add_journal_entry(ticker: str, body: str, image_path: str | None = None) -> dict:
+    row = {"ticker": ticker, "body": body.strip()}
+    if image_path:
+        row["image_path"] = image_path
+    try:
+        return _insert("journal_entries", row)
+    except Exception as error:
+        if image_path and _lacks_image_column(error):
+            raise RuntimeError(_MISSING_IMAGE_COLUMN) from error
+        raise
 
 
 def list_journal(
     ticker: str | None = None, search: str | None = None, limit: int = 30
 ) -> tuple[list[dict], int]:
     """Nyeste notater først. Returnerer (notater, totalt antall treff)."""
-    query = _table("journal_entries").select("id, ticker, body, created_at", count="exact")
+    try:
+        return _list_journal("id, ticker, body, created_at, image_path", ticker, search, limit)
+    except Exception as error:
+        if _lacks_image_column(error):  # eldre database uten bildekolonne
+            return _list_journal("id, ticker, body, created_at", ticker, search, limit)
+        raise
+
+
+def _list_journal(columns: str, ticker: str | None, search: str | None, limit: int) -> tuple[list[dict], int]:
+    query = _table("journal_entries").select(columns, count="exact")
     if ticker:
         query = query.eq("ticker", ticker)
     if search and search.strip():

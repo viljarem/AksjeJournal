@@ -12,9 +12,10 @@
   #bar { height: 24px; line-height: 24px; font-size: 13px; padding-left: 48px; display: flex; gap: 12px; align-items: center; }
   #status { opacity: 0.75; flex: 1; }
   #status.error { color: #dc2626; opacity: 1; }
-  #fullscreen, #logscale { font: inherit; font-size: 12px; line-height: 20px; padding: 0 8px; border-radius: 4px; border: 1px solid currentColor;
+  #fullscreen, #logscale, #snapshot { font: inherit; font-size: 12px; line-height: 20px; padding: 0 8px; border-radius: 4px; border: 1px solid currentColor;
     background: transparent; color: inherit; opacity: 0.75; cursor: pointer; margin-right: 8px; }
-  #fullscreen:hover, #logscale:hover { opacity: 1; }
+  #fullscreen:hover, #logscale:hover, #snapshot:hover { opacity: 1; }
+  #snapshot:disabled { opacity: 0.4; cursor: default; }
   #logscale.on { opacity: 1; font-weight: 600; }
   #fatal { padding: 24px; font-size: 15px; }
   .hc-info { font-size: 12px; line-height: 1.45; white-space: nowrap; }
@@ -25,7 +26,7 @@
 </head>
 <body>
 <div id="chart"></div>
-<div id="bar"><span id="status"></span><button id="logscale" type="button" title="Bytt mellom lineær og logaritmisk kursakse">Log</button><button id="fullscreen" type="button" title="Vis grafen i fullskjerm (Esc for å avslutte)">⛶ Fullskjerm</button></div>
+<div id="bar"><span id="status"></span><button id="snapshot" type="button" title="Lagre chartet med tegninger som bilde til et notat">📷 Bilde til notat</button><button id="logscale" type="button" title="Bytt mellom lineær og logaritmisk kursakse">Log</button><button id="fullscreen" type="button" title="Vis grafen i fullskjerm (Esc for å avslutte)">⛶ Fullskjerm</button></div>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/highstock.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/highcharts-more.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/drag-panes.js"></script>
@@ -33,6 +34,9 @@
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/price-indicator.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/stock-tools.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/mouse-wheel-zoom.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/indicators/indicators.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/indicators/volume-by-price.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/exporting.js"></script>
 <script>
 (function () {
   const ICONS = "https://cdn.jsdelivr.net/npm/highcharts@12.6.2/gfx/stock-icons/";
@@ -268,7 +272,7 @@
     }
 
     series.push({
-      type: "column", name: "Volum", yAxis: 1, showInLegend: false, turboThreshold: 0,
+      type: "column", id: "volume", name: "Volum", yAxis: 1, showInLegend: false, turboThreshold: 0,
       data: args.volume.map(function (v) { return { x: v[0], y: v[1], color: v[2] ? UP : DOWN }; }),
     });
     series.push({
@@ -289,6 +293,16 @@
     }
     if (ind.rsi) { panels.push({ name: "RSI 14", data: ind.rsi, color: p.dark ? "#f472b6" : "#db2777", min: 0, max: 100, lines: [30, 70] }); }
     if (ind.atr) { panels.push({ name: "ATR 14", data: ind.atr, color: p.dark ? "#34d399" : "#059669" }); }
+    if (ind.vbp) {
+      // Volum per kursnivå: vannrette stolper fra venstre kant, beregnet av Highcharts for synlig periode.
+      series.push({
+        type: "vbp", name: "Volum per kursnivå", linkedTo: "price", showInLegend: true, zIndex: 0,
+        params: { volumeSeriesID: "volume", ranges: 24 },
+        dataLabels: { enabled: false }, zoneLines: { enabled: false },
+        volumeDivision: { enabled: true, styles: { positiveColor: "rgba(22,163,74,0.35)", negativeColor: "rgba(220,38,38,0.35)" } },
+        enableMouseTracking: false,
+      });
+    }
 
     // Panelhøyder i prosent: pris, volum og eventuelle indikatorpaneler.
     const gap = 3, panelH = 14, volH = panels.length ? 14 : 21;
@@ -328,6 +342,8 @@
         zooming: { mouseWheel: { enabled: true, type: "x", sensitivity: 1.2 } },
       },
       credits: { enabled: false },
+      exporting: { enabled: false },
+      exporting: { enabled: false },
       navigation: { iconsURL: ICONS },
       stockTools: {
         gui: {
@@ -577,6 +593,41 @@
     if (chart) { chart.yAxis[0].update({ type: logScale ? "logarithmic" : "linear", min: null, max: null }, true); }
   });
   renderLogButton();
+
+  // Bilde til notat: SVG fra Highcharts (med tegninger) rasteriseres til PNG i nettleseren og sendes
+  // til Streamlit, som legger det klart ved neste notat på aksjesiden.
+  const snapButton = document.getElementById("snapshot");
+  function snapshot() {
+    if (!chart) { return; }
+    snapButton.disabled = true;
+    setStatus("Lager bilde …");
+    try {
+      const width = chart.chartWidth, height = chart.chartHeight, scale = 2;
+      const svg = chart.getSVG({ chart: { backgroundColor: chart.options.chart.backgroundColor } });
+      const img = new Image();
+      img.onload = function () {
+        const canvas = document.createElement("canvas");
+        canvas.width = width * scale; canvas.height = height * scale;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = chart.options.chart.backgroundColor || "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const png = canvas.toDataURL("image/png");
+        send("streamlit:setComponentValue", {
+          value: { ticker: ticker, nonce: "img-" + Date.now(), png: png }, dataType: "json",
+        });
+        setStatus("Bildet ligger klart ved notatskjemaet under chartet.");
+        snapButton.disabled = false;
+      };
+      img.onerror = function () { setStatus("Kunne ikke lage bilde av chartet.", true); snapButton.disabled = false; };
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    } catch (error) {
+      console.warn(error);
+      setStatus("Kunne ikke lage bilde av chartet.", true);
+      snapButton.disabled = false;
+    }
+  }
+  snapButton.addEventListener("click", snapshot);
 
   window.addEventListener("message", function (event) {
     if (event.data && event.data.type === "streamlit:render") { onRender(event); }

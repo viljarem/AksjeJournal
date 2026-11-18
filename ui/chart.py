@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import pandas as pd
@@ -87,7 +88,7 @@ DEFAULT_SMAS = [
     {"id": 3, "period": 200, "color": "#9333ea"},
 ]
 
-DEFAULT_INDICATORS = {"bollinger": False, "rsi": False, "atr": False}
+DEFAULT_INDICATORS = {"bollinger": False, "rsi": False, "atr": False, "vbp": False}
 
 
 def bollinger(close: pd.Series, period: int = 20, width: float = 2.0) -> tuple[pd.Series, pd.Series, pd.Series]:
@@ -125,6 +126,8 @@ def indicator_payload(analysis: Analysis, indicators: dict) -> dict:
         out["rsi"] = _line(x, rsi(frame["close"]))
     if indicators.get("atr"):
         out["atr"] = _line(x, atr(frame))
+    if indicators.get("vbp"):
+        out["vbp"] = True  # beregnes av Highcharts fra kurs og volum
     return out
 
 
@@ -146,6 +149,7 @@ def indicator_editor() -> dict:
             "bollinger": st.checkbox("Bollinger-bånd (20, 2σ)", current["bollinger"], key="ind_bollinger"),
             "rsi": st.checkbox("RSI (14) – eget panel", current["rsi"], key="ind_rsi"),
             "atr": st.checkbox("ATR (14) – eget panel", current["atr"], key="ind_atr"),
+            "vbp": st.checkbox("Volum per kursnivå (Volume by Price)", current.get("vbp", False), key="ind_vbp"),
         }
         st.caption("Gjelder alle aksjer.")
 
@@ -248,9 +252,18 @@ def stock_chart(
         **payload,
     )
 
-    if not (can_save and value and value.get("ticker") == ticker):
+    if not (value and value.get("ticker") == ticker):
         return
     nonce = value["nonce"]
+    if value.get("png"):
+        # Chartbilde fra komponenten: legges klart til neste notat på aksjesiden.
+        if st.session_state.get("chart_image_nonce") != nonce:
+            st.session_state["chart_image_nonce"] = nonce
+            st.session_state[f"chart_image_{ticker}"] = base64.b64decode(value["png"].split(",", 1)[-1])
+            st.rerun()
+        return
+    if not can_save:
+        return
     if nonce in (saved.get(ticker), failed.get(ticker)):
         return  # allerede behandlet
     try:

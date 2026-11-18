@@ -50,3 +50,17 @@ def load_frame(name: str) -> pd.DataFrame | None:
     if path.exists():
         return pd.read_parquet(path)
     return None
+
+
+def save_image(name: str, payload: bytes) -> None:
+    """Laster opp et PNG-bilde (chartbilde til journalen) til Storage-bøtta."""
+    supabase_client().storage.from_(BUCKET).upload(name, payload, {"content-type": "image/png", "upsert": "true"})
+
+
+def load_image(name: str) -> bytes | None:
+    try:
+        return supabase_client().storage.from_(BUCKET).download(name)
+    except Exception as error:
+        if _is_not_found(error):
+            return None
+        raise

@@ -27,6 +27,8 @@ create table if not exists public.journal_entries (
     body       text        not null check (length(btrim(body)) > 0),
     created_at timestamptz not null default now()
 );
+-- Chartbilde knyttet til notatet (sti i Storage-bøtta). Lagt til senere, derfor egen setning.
+alter table public.journal_entries add column if not exists image_path text;
 
 create index if not exists journal_entries_created_idx on public.journal_entries (created_at desc);
 create index if not exists journal_entries_ticker_idx on public.journal_entries (ticker, created_at desc);
