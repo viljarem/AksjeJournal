@@ -101,6 +101,9 @@ def apply_quotes(screen: pd.DataFrame, quotes: pd.DataFrame | None) -> pd.DataFr
     if not ok.any():
         return out
 
+    # En ny børsdag er i gang: bruddet ligger én dag lenger tilbake.
+    newer = ok & (q_date > out["date"]) & out["breakout_bars_ago"].notna()
+    out.loc[newer, "breakout_bars_ago"] = out.loc[newer, "breakout_bars_ago"] + 1
     out.loc[ok, "close"] = q.loc[ok, "last"].astype(float)
     out.loc[ok, "chg_1d"] = q.loc[ok, "chg_day"].astype(float)
     out.loc[ok, "volume"] = q.loc[ok, "volume"].astype(float)

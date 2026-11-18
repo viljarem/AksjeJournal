@@ -33,6 +33,7 @@ COLUMNS = {
     "to_pivot": ("Opp til pivot", lambda v: f"{nb(v, 1)} %", None),
     "base_depth": ("Basedybde", lambda v: f"{nb(v, 1)} %", None),
     "breakout_date": ("Bruddato", _date, None),
+    "breakout_bars_ago": ("Dager siden brudd", lambda v: f"{v:.0f}", None),
     "breakout_pivot": ("Brutt pivot", nb, None),
     "breakout_rvol": ("Rel. volum ved brudd", _times, "rvol"),
     "breakout_gain": ("Siden brudd", pct, "pct"),
@@ -51,6 +52,7 @@ COLUMNS = {
 
 HELP = {
     "Signal": "Brudd de siste 5 børsdagene, eller kurs høyst 5 % under aktiv pivot.",
+    "Dager siden brudd": "Børsdager siden sluttkursen brøt over pivoten. 0 = bruddet kom siste børsdag.",
     "Trend": "Antall oppfylte kriterier i Minervinis trend template.",
     "Rel. volum": "Dagens volum så langt delt på 50-dagers snittvolum.",
     "Siste": "Siste kurs fra Yahoo, ca. 15 minutter forsinket.",

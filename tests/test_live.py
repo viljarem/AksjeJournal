@@ -68,6 +68,7 @@ def screen():
             "above_low": [25.0, 25.0, 33.3],
             "pivot_price": [105.0, np.nan, 22.0],
             "to_pivot": [5.0, np.nan, 10.0],
+            "breakout_bars_ago": [2.0, np.nan, 4.0],
             "score": [7, 3, 1],
         }
     )
@@ -92,6 +93,8 @@ def test_apply_quotes_updates_price_volume_and_distances():
     assert a["high_52w"] == 113 and a["from_high"] == pytest.approx((112 / 113 - 1) * 100)
     assert a["above_low"] == pytest.approx(40) and a["to_pivot"] == pytest.approx((105 / 112 - 1) * 100)
     assert a["date"] == pd.Timestamp("2026-11-17") and a["score"] == 7
+    assert a["breakout_bars_ago"] == 3  # ny børsdag teller med
+    assert np.isnan(out.loc["B", "breakout_bars_ago"]) and out.loc["C", "breakout_bars_ago"] == 4
     assert out.loc["B", "close"] == 55 and np.isnan(out.loc["B", "rel_vol"])  # uten snittvolum
     assert np.isnan(out.loc["B", "to_pivot"])
     c = out.loc["C"]  # ingen fersk kurs: uendret

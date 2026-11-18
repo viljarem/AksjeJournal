@@ -39,7 +39,7 @@ choice = st.segmented_control(
 
 lead = ["symbol", "name", "status", "score", "close", "chg_1d", "rel_vol"]
 tail = ["from_high", "rs", "perf_3m", "turnover_m"]
-breakout_cols = ["breakout_date", "breakout_pivot", "breakout_rvol", "breakout_gain"]
+breakout_cols = ["breakout_bars_ago", "breakout_pivot", "breakout_rvol", "breakout_gain"]
 pivot_cols = ["pivot_price", "to_pivot", "base_depth"]
 
 if choice in (STATUS_VOLUME, STATUS_NO_VOLUME):
@@ -47,7 +47,7 @@ if choice in (STATUS_VOLUME, STATUS_NO_VOLUME):
         f"Sluttkurs over pivot de siste {config.RECENT_BREAKOUT_BARS} børsdagene. «Med volum» betyr "
         f"minst {config.BREAKOUT_RVOL:g}x snittvolumet (SMA50) på bruddagen."
     )
-    table = views[choice].sort_values(["breakout_date", "breakout_rvol"], ascending=False)
+    table = views[choice].sort_values(["breakout_bars_ago", "breakout_rvol"], ascending=[True, False])
     columns = lead + breakout_cols + tail
 elif choice == STATUS_NEAR:
     st.caption(f"Kursen ligger høyst {config.NEAR_PIVOT_PCT:g} % under en aktiv pivot.")
