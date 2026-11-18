@@ -8,6 +8,7 @@
   html, body { margin: 0; padding: 0; background: transparent; font-family: "Source Sans Pro", "Source Sans", system-ui, sans-serif; }
   #chart { width: 100%; }
   #chart.axis-drag, #chart.axis-drag * { cursor: ew-resize !important; }
+  #chart.yaxis-drag, #chart.yaxis-drag * { cursor: ns-resize !important; }
   #bar { height: 24px; line-height: 24px; font-size: 13px; padding-left: 48px; display: flex; gap: 12px; align-items: center; }
   #status { opacity: 0.75; flex: 1; }
   #status.error { color: #dc2626; opacity: 1; }
@@ -292,7 +293,7 @@
     const priceH = 100 - volH - gap - panels.length * (panelH + gap);
     const axisLabel = Object.assign({ align: "left", x: 6 }, label);
     const yAxes = [
-      { height: priceH + "%", labels: axisLabel, gridLineColor: p.grid, resize: { enabled: true, lineColor: p.line }, crosshair: { color: p.line, snap: false } },
+      { height: priceH + "%", labels: axisLabel, gridLineColor: p.grid, startOnTick: false, endOnTick: false, resize: { enabled: true, lineColor: p.line }, crosshair: { color: p.line, snap: false } },
       { top: (priceH + gap) + "%", height: volH + "%", labels: axisLabel, gridLineColor: p.grid, resize: { enabled: true, lineColor: p.line } },
     ];
     let top = priceH + gap + volH + gap;
@@ -501,6 +502,37 @@
     chart.xAxis[0].setExtremes(min, axisDrag.max, true, false);
   });
   window.addEventListener("mouseup", function () { if (axisDrag) { axisDrag = null; chartEl.classList.remove("axis-drag"); } });
+
+  // Dra i kursaksen (høyre marg ved prispanelet) opp/ned for å panorere kursen. Aksen slutter da å
+  // skalere seg automatisk; dobbeltklikk i samme område setter den tilbake til automatisk.
+  let yDrag = null;
+  function inYAxisArea(event) {
+    if (!chart) { return false; }
+    const rect = chart.container.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    const axis = chart.yAxis[0];
+    return x > chart.plotLeft + chart.plotWidth && x < chart.chartWidth && y >= axis.top && y <= axis.top + axis.len;
+  }
+  chartEl.addEventListener("mousemove", function (event) {
+    if (axisDrag || yDrag) { return; }
+    chartEl.classList.toggle("yaxis-drag", inYAxisArea(event));
+  });
+  chartEl.addEventListener("mousedown", function (event) {
+    if (event.button !== 0 || !inYAxisArea(event)) { return; }
+    const ext = chart.yAxis[0].getExtremes();
+    yDrag = { startY: event.clientY, min: ext.min, max: ext.max };
+    event.stopPropagation(); event.preventDefault();
+  }, true);
+  window.addEventListener("mousemove", function (event) {
+    if (!yDrag) { return; }
+    const axis = chart.yAxis[0];
+    const shift = (event.clientY - yDrag.startY) / axis.len * (yDrag.max - yDrag.min);
+    axis.setExtremes(yDrag.min + shift, yDrag.max + shift, true, false);
+  });
+  window.addEventListener("mouseup", function () { if (yDrag) { yDrag = null; chartEl.classList.remove("yaxis-drag"); } });
+  chartEl.addEventListener("dblclick", function (event) {
+    if (inYAxisArea(event)) { chart.yAxis[0].setExtremes(null, null, true, false); event.stopPropagation(); }
+  }, true);
 
   window.addEventListener("message", function (event) {
     if (event.data && event.data.type === "streamlit:render") { onRender(event); }
