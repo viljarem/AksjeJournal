@@ -9,6 +9,8 @@ import pandas as pd
 import streamlit as st
 
 from core import config, storage
+from core.prices import fetch_quotes
+from core.screener import apply_quotes
 from core.settings import get_secret, supabase_configured
 
 CHART_PAGE = "views/aksje.py"
@@ -60,6 +62,24 @@ def _prices(market: str) -> pd.DataFrame | None:
     return storage.load_frame(config.prices_file(market))
 
 
+@st.cache_data(ttl=60, show_spinner="Henter ferske kurser …")
+def _quotes(tickers: tuple[str, ...]) -> tuple[pd.DataFrame, str]:
+    return fetch_quotes(list(tickers)), pd.Timestamp.now(tz=OSLO).strftime("%H:%M")
+
+
+def live_quotes(tickers) -> pd.DataFrame | None:
+    """Ferske kurser fra Yahoo (mellomlagres ett minutt), eller None hvis hentingen feilet."""
+    try:
+        quotes, fetched = _quotes(tuple(str(t) for t in tickers))
+    except Exception:
+        quotes, fetched = None, None
+    if quotes is None or quotes.empty:
+        st.session_state["live_time"] = None
+        return None
+    st.session_state["live_time"] = fetched
+    return quotes
+
+
 def clear_data_cache() -> None:
     _screen.clear()
     _prices.clear()
@@ -88,7 +108,7 @@ def require_screen() -> tuple[str, pd.DataFrame]:
             "Trykk **Oppdater kurser nå** i menyen til venstre."
         )
         st.stop()
-    return market, screen
+    return market, apply_quotes(screen, live_quotes(screen["ticker"]))
 
 
 def universe() -> pd.DataFrame:

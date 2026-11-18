@@ -88,13 +88,36 @@ def download_history(
     return prices[PRICE_COLUMNS], missing
 
 
+def with_quote(history: pd.DataFrame, quote: pd.Series | None) -> pd.DataFrame:
+    """Historikken med dagens (uferdige) candle fra en fersk kurs lagt til eller oppdatert."""
+    if quote is None or pd.isna(quote["last"]) or pd.isna(quote["date"]):
+        return history
+    day = pd.Timestamp(quote["date"])
+    if day < history["date"].iloc[-1]:
+        return history
+    today = pd.DataFrame(
+        [
+            {
+                "date": day,
+                "open": quote["open"],
+                "high": quote["high"],
+                "low": quote["low"],
+                "close": quote["last"],
+                "volume": quote["volume"],
+            }
+        ]
+    )
+    base = history[history["date"] < day].assign(date=lambda d: d["date"].astype("datetime64[ns]"))
+    return pd.concat([base, today], ignore_index=True)
+
+
 def fetch_quotes(tickers: Sequence[str]) -> pd.DataFrame:
     """Siste kurs for et lite utvalg tickere (forsinket ca. 15 minutter hos Yahoo).
 
     Returnerer en tabell indeksert på ticker med last, open, prev_close,
     chg_open (% siden åpning), chg_day (% siden forrige sluttkurs) og date.
     """
-    columns = ["last", "open", "prev_close", "chg_open", "chg_day", "date"]
+    columns = ["last", "open", "high", "low", "volume", "prev_close", "chg_open", "chg_day", "date"]
     rows = {}
     if tickers:
         for ticker, frame in _download(tickers, "5d").items():
@@ -103,6 +126,9 @@ def fetch_quotes(tickers: Sequence[str]) -> pd.DataFrame:
             rows[ticker] = {
                 "last": last["close"],
                 "open": last["open"],
+                "high": last["high"],
+                "low": last["low"],
+                "volume": last["volume"],
                 "prev_close": prev_close,
                 "chg_open": (last["close"] / last["open"] - 1) * 100 if last["open"] else float("nan"),
                 "chg_day": (last["close"] / prev_close - 1) * 100 if prev_close else float("nan"),

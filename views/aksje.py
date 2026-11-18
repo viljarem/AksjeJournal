@@ -5,9 +5,11 @@ import streamlit as st
 
 from core import db
 from core.indicators import CRITERIA, CRITERIA_TEXT, analyze
+from core.prices import with_quote
+from core.screener import apply_quotes
 from core.settings import supabase_configured
 from ui.chart import sma_editor, stock_chart
-from ui.common import history, load_screen, nb, pct, ticker_picker, universe
+from ui.common import history, live_quotes, load_screen, nb, pct, ticker_picker, universe
 from ui.journal import entry_form, render_entries
 
 stocks = universe()
@@ -37,12 +39,19 @@ if prices is None:
     st.stop()
 
 info = stocks.loc[ticker]
-row = load_screen(info["market"]).set_index("ticker").loc[ticker]
+screen = load_screen(info["market"])
+row_frame = screen[screen["ticker"] == ticker]
+quotes = live_quotes([ticker])
+if quotes is not None and ticker in quotes.index:
+    # Dagens uferdige candle legges til, og nøkkeltallene over chartet bruker fersk kurs.
+    row_frame = apply_quotes(row_frame, quotes)
+    prices = with_quote(prices, quotes.loc[ticker])
+row = row_frame.iloc[0]
 analysis = analyze(prices)
 
 st.title(f"{info['symbol']} · {info['name']}")
 metrics = st.columns(6)
-metrics[0].metric("Siste sluttkurs", nb(row["close"]), pct(row["chg_1d"]) if pd.notna(row["chg_1d"]) else None)
+metrics[0].metric("Siste kurs", nb(row["close"]), pct(row["chg_1d"]) if pd.notna(row["chg_1d"]) else None)
 metrics[1].metric("Trend template", f"{row['score']}/7")
 metrics[2].metric("Rel. volum", "–" if pd.isna(row["rel_vol"]) else f"{nb(row['rel_vol'])}x")
 metrics[3].metric("Fra 52u topp", pct(row["from_high"]))

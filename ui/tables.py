@@ -52,7 +52,8 @@ COLUMNS = {
 HELP = {
     "Signal": "Brudd de siste 5 børsdagene, eller kurs høyst 5 % under aktiv pivot.",
     "Trend": "Antall oppfylte kriterier i Minervinis trend template.",
-    "Rel. volum": "Dagens volum delt på 50-dagers snittvolum.",
+    "Rel. volum": "Dagens volum så langt delt på 50-dagers snittvolum.",
+    "Siste": "Siste kurs fra Yahoo, ca. 15 minutter forsinket.",
     "RS": "Relativ styrke 1–99 mot resten av børsen (vektet 3–12 mnd utvikling).",
     "Opp til pivot": "Hvor mye kursen må stige for å nå pivoten.",
     "Basedybde": "Største fall fra pivoten så langt.",
@@ -116,5 +117,13 @@ def screen_table(df: pd.DataFrame, columns: list[str], key: str, height: int = 6
         },
         key=f"{key}-{st.session_state.get('table_nonce', 0)}",
     )
+    fetched = st.session_state.get("live_time")
+    if fetched:
+        st.caption(
+            f"Kurs og relativt volum hentet kl. {fetched} fra Yahoo (ca. 15 min forsinket). "
+            "Signaler, trend og RS er fra siste dagsoppdatering."
+        )
+    else:
+        st.caption("Fikk ikke hentet ferske kurser nå. Viser siste lagrede sluttkurs.")
     if event.selection.rows:
         open_chart(df.iloc[event.selection.rows[0]]["ticker"])

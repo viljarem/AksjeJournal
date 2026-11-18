@@ -84,6 +84,37 @@ def summarize(ticker: str, df: pd.DataFrame) -> dict:
     return row
 
 
+def apply_quotes(screen: pd.DataFrame, quotes: pd.DataFrame | None) -> pd.DataFrame:
+    """Screeningtabellen med ferske kurser lagt over.
+
+    Oppdaterer kurs, dagsendring, relativt volum (dagens volum så langt mot lagret SMA50)
+    og avstandene til 52-ukers topp/bunn og pivot. Trend, signaler og RS er uendret.
+    """
+    out = screen.copy()
+    if quotes is None or quotes.empty:
+        return out
+    out["date"] = out["date"].astype("datetime64[ns]")
+    q = quotes.reindex(out["ticker"].astype(str))
+    q.index = out.index
+    q_date = pd.to_datetime(q["date"]).astype("datetime64[ns]")
+    ok = q["last"].notna() & (q_date >= out["date"])
+    if not ok.any():
+        return out
+
+    out.loc[ok, "close"] = q.loc[ok, "last"].astype(float)
+    out.loc[ok, "chg_1d"] = q.loc[ok, "chg_day"].astype(float)
+    out.loc[ok, "volume"] = q.loc[ok, "volume"].astype(float)
+    out.loc[ok, "date"] = q_date[ok]
+    has_avg = ok & (out["vol_sma50"] > 0)
+    out.loc[has_avg, "rel_vol"] = (q.loc[has_avg, "volume"] / out.loc[has_avg, "vol_sma50"]).astype(float)
+    out.loc[ok, "high_52w"] = np.fmax(out.loc[ok, "high_52w"].to_numpy(float), q.loc[ok, "high"].to_numpy(float))
+    out.loc[ok, "low_52w"] = np.fmin(out.loc[ok, "low_52w"].to_numpy(float), q.loc[ok, "low"].to_numpy(float))
+    out.loc[ok, "from_high"] = (out.loc[ok, "close"] / out.loc[ok, "high_52w"] - 1) * 100
+    out.loc[ok, "above_low"] = (out.loc[ok, "close"] / out.loc[ok, "low_52w"] - 1) * 100
+    out.loc[ok, "to_pivot"] = (out.loc[ok, "pivot_price"] / out.loc[ok, "close"] - 1) * 100
+    return out
+
+
 def _rs_rating(screen: pd.DataFrame) -> pd.Series:
     """Relativ styrke 1–99 innen markedet (3 mnd teller dobbelt, slik IBD gjør)."""
     weighted = (
