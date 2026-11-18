@@ -8,7 +8,7 @@ from core.indicators import CRITERIA, CRITERIA_TEXT, analyze
 from core.prices import with_quote
 from core.screener import apply_quotes
 from core.settings import supabase_configured
-from ui.chart import sma_editor, stock_chart
+from ui.chart import indicator_editor, sma_editor, stock_chart
 from ui.common import history, live_quotes, load_screen, nb, pct, ticker_picker, universe
 from ui.journal import entry_form, render_entries
 
@@ -71,11 +71,16 @@ with st.expander(f"Trend template: {row['score']} av 7 kriterier oppfylt"):
 
 drawings = db.get_drawings(ticker) if supabase_configured() else []
 trades = db.ticker_transactions(ticker) if supabase_configured() else []
-smas = sma_editor()
-stock_chart(ticker, f"{info['symbol']}", analysis, drawings, trades, smas)
+menus = st.columns([1, 1, 4])
+with menus[0]:
+    smas = sma_editor()
+with menus[1]:
+    indicators = indicator_editor()
+stock_chart(ticker, f"{info['symbol']}", analysis, drawings, trades, smas, indicators)
 st.caption(
-    "Tegn med verktøyene til venstre i chartet. Klikk på navnene under chartet for å vise eller skjule "
-    "glidende snitt, pivoter, brudd (B) og 7/7-perioder (grønt felt)."
+    "Tegn med verktøyene til venstre i chartet. Dra i datoaksen for å strekke eller presse sammen stolpene, "
+    "dra i selve chartet for å panorere (også forbi siste kurs), rull for å zoome. "
+    "Klikk på navnene under chartet for å vise eller skjule linjer, pivoter, brudd (B) og 7/7-perioder (grønt felt)."
 )
 
 if not supabase_configured():

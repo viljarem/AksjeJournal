@@ -87,6 +87,78 @@ DEFAULT_SMAS = [
     {"id": 3, "period": 200, "color": "#9333ea"},
 ]
 
+DEFAULT_INDICATORS = {"bollinger": False, "rsi": False, "atr": False}
+
+
+def bollinger(close: pd.Series, period: int = 20, width: float = 2.0) -> tuple[pd.Series, pd.Series, pd.Series]:
+    mid = close.rolling(period).mean()
+    std = close.rolling(period).std(ddof=0)
+    return mid - width * std, mid, mid + width * std
+
+
+def rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """RSI etter Wilder (eksponentielt glattet gjennomsnitt av opp- og nedgang)."""
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    rs = gain / loss.replace(0, pd.NA)
+    return (100 - 100 / (1 + rs)).fillna(100).where(gain.notna())
+
+
+def atr(frame: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Average True Range etter Wilder."""
+    prev = frame["close"].shift()
+    tr = pd.concat(
+        [frame["high"] - frame["low"], (frame["high"] - prev).abs(), (frame["low"] - prev).abs()], axis=1
+    ).max(axis=1)
+    return tr.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+
+
+def indicator_payload(analysis: Analysis, indicators: dict) -> dict:
+    frame = analysis.frame
+    x = [_ms(d) for d in frame["date"]]
+    out: dict = {}
+    if indicators.get("bollinger"):
+        lower, mid, upper = bollinger(frame["close"])
+        out["bollinger"] = {"lower": _line(x, lower), "mid": _line(x, mid), "upper": _line(x, upper)}
+    if indicators.get("rsi"):
+        out["rsi"] = _line(x, rsi(frame["close"]))
+    if indicators.get("atr"):
+        out["atr"] = _line(x, atr(frame))
+    return out
+
+
+def indicator_editor() -> dict:
+    """Meny for å slå indikatorer av og på. Returnerer gjeldende oppsett."""
+    state = st.session_state
+    if "indicators" not in state:
+        stored = None
+        if supabase_configured():
+            try:
+                stored = db.get_chart_indicators()
+            except Exception:
+                stored = None
+        state["indicators"] = {**DEFAULT_INDICATORS, **(stored or {})}
+    current = state["indicators"]
+
+    with st.popover("Indikatorer", icon=":material/analytics:"):
+        edited = {
+            "bollinger": st.checkbox("Bollinger-bånd (20, 2σ)", current["bollinger"], key="ind_bollinger"),
+            "rsi": st.checkbox("RSI (14) – eget panel", current["rsi"], key="ind_rsi"),
+            "atr": st.checkbox("ATR (14) – eget panel", current["atr"], key="ind_atr"),
+        }
+        st.caption("Gjelder alle aksjer.")
+
+    if edited != current:
+        state["indicators"] = edited
+        if supabase_configured():
+            try:
+                db.save_chart_indicators(edited)
+            except Exception as error:
+                st.warning(f"Oppsettet ble ikke lagret: {error}")
+        st.rerun()
+    return current
+
 
 def sma_editor() -> list[dict]:
     """Meny for å legge til, fjerne og fargelegge SMA-linjer. Returnerer gjeldende oppsett."""
@@ -138,11 +210,13 @@ def stock_chart(
     annotations: list,
     transactions: list[dict] | None = None,
     smas: list[dict] | None = None,
+    indicators: dict | None = None,
     height: int = 640,
 ) -> None:
     """Viser chartet. Tegninger lagres automatisk i Supabase når de endres."""
     payload = chart_payload(analysis)
     smas = DEFAULT_SMAS if smas is None else smas
+    indicators = DEFAULT_INDICATORS if indicators is None else indicators
     x = [_ms(d) for d in analysis.frame["date"]]
     close = analysis.frame["close"]
     payload["smas"] = [
@@ -150,6 +224,8 @@ def stock_chart(
         for s in smas
     ]
     payload["chart_key"] += "-" + ",".join(f"{s['period']}{s['color']}" for s in smas)
+    payload["indicators"] = indicator_payload(analysis, indicators)
+    payload["chart_key"] += "-" + ",".join(sorted(payload["indicators"]))
     payload["trades"] = trade_markers(analysis, transactions or [])
     # Chartet bygges på nytt når handlene endres.
     payload["chart_key"] += "-" + ",".join(

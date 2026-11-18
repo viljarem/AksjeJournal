@@ -7,6 +7,7 @@
 <style>
   html, body { margin: 0; padding: 0; background: transparent; font-family: "Source Sans Pro", "Source Sans", system-ui, sans-serif; }
   #chart { width: 100%; }
+  #chart.axis-drag, #chart.axis-drag * { cursor: ew-resize !important; }
   #bar { height: 24px; line-height: 24px; font-size: 13px; padding-left: 48px; display: flex; gap: 12px; align-items: center; }
   #status { opacity: 0.75; flex: 1; }
   #status.error { color: #dc2626; opacity: 1; }
@@ -24,15 +25,19 @@
 <div id="chart"></div>
 <div id="bar"><span id="status"></span><button id="fullscreen" type="button" title="Vis grafen i fullskjerm (Esc for å avslutte)">⛶ Fullskjerm</button></div>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/highstock.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/highcharts-more.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/drag-panes.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/annotations-advanced.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/price-indicator.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/stock-tools.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highcharts@12.6.2/modules/mouse-wheel-zoom.js"></script>
 <script>
 (function () {
   const ICONS = "https://cdn.jsdelivr.net/npm/highcharts@12.6.2/gfx/stock-icons/";
   const UP = "#16a34a", DOWN = "#dc2626", AMBER = "#d97706", BLUE = "#2563eb";
+  const OVERSCROLL = 45 * 24 * 3600 * 1000; // ca. 45 dager tomrom etter siste kurs
   const statusEl = document.getElementById("status");
+  const chartEl = document.getElementById("chart");
 
   let chart = null;        // gjeldende Highcharts-graf
   let chartKey = null;     // hvilke data grafen er bygget fra
@@ -148,6 +153,10 @@
         if (pt.series.type === "line" && pt.series.name.indexOf("SMA") === 0 && pt.series.yAxis === chart.yAxis[0]) {
           lines.push('<span style="color:' + pt.series.color + '">' + pt.series.name + "</span> " + num(pt.y, 2) +
             ' <span class="dim">' + pct((row[4] / pt.y - 1) * 100, "dim") + "</span>");
+        } else if (pt.series.type === "arearange") {
+          lines.push('<span style="color:' + pt.series.color + '">BB</span> ' + num(pt.low, 2) + "–" + num(pt.high, 2));
+        } else if (pt.series.type === "line" && pt.series.yAxis && pt.series.yAxis.options.title && pt.series.yAxis.options.title.text) {
+          lines.push('<span style="color:' + pt.series.color + '">' + pt.series.name + "</span> " + num(pt.y, 2));
         }
       });
       if (lines.length) { html += "<br>" + lines.join(" &nbsp; "); }
@@ -264,6 +273,40 @@
       lineWidth: 1.3, zIndex: 2, tooltip: { valueDecimals: 0 },
     });
 
+    // Indikatorer. Bollinger legges i prispanelet, RSI og ATR får egne paneler under volumet.
+    const ind = args.indicators || {};
+    const panels = []; // ekstra paneler: { id, name, data, color, bands }
+    if (ind.bollinger) {
+      const BB = p.dark ? "#a78bfa" : "#7c3aed";
+      series.push({
+        type: "arearange", name: "Bollinger", id: "bb", zIndex: 1, color: BB, lineWidth: 1, fillOpacity: 0.08,
+        data: ind.bollinger.lower.map(function (lo, i) { return [lo[0], lo[1], ind.bollinger.upper[i][1]]; }),
+      });
+      series.push({ type: "line", name: "BB midt", linkedTo: "bb", data: ind.bollinger.mid, color: BB, lineWidth: 1, dashStyle: "ShortDot", zIndex: 1 });
+    }
+    if (ind.rsi) { panels.push({ name: "RSI 14", data: ind.rsi, color: p.dark ? "#f472b6" : "#db2777", min: 0, max: 100, lines: [30, 70] }); }
+    if (ind.atr) { panels.push({ name: "ATR 14", data: ind.atr, color: p.dark ? "#34d399" : "#059669" }); }
+
+    // Panelhøyder i prosent: pris, volum og eventuelle indikatorpaneler.
+    const gap = 3, panelH = 14, volH = panels.length ? 14 : 21;
+    const priceH = 100 - volH - gap - panels.length * (panelH + gap);
+    const axisLabel = Object.assign({ align: "left", x: 6 }, label);
+    const yAxes = [
+      { height: priceH + "%", labels: axisLabel, gridLineColor: p.grid, resize: { enabled: true, lineColor: p.line }, crosshair: { color: p.line, snap: false } },
+      { top: (priceH + gap) + "%", height: volH + "%", labels: axisLabel, gridLineColor: p.grid, resize: { enabled: true, lineColor: p.line } },
+    ];
+    let top = priceH + gap + volH + gap;
+    panels.forEach(function (panel, i) {
+      yAxes.push({
+        top: top + "%", height: panelH + "%", labels: axisLabel, gridLineColor: p.grid, min: panel.min, max: panel.max,
+        title: { text: panel.name, align: "high", offset: 0, rotation: 0, y: 12, x: 4, textAlign: "left", style: { color: panel.color, fontSize: "11px" } },
+        resize: { enabled: i < panels.length - 1, lineColor: p.line },
+        plotLines: (panel.lines || []).map(function (v) { return { value: v, color: p.line, dashStyle: "Dash", width: 1 }; }),
+      });
+      series.push({ type: "line", name: panel.name, yAxis: yAxes.length - 1, data: panel.data, color: panel.color, lineWidth: 1.3, showInLegend: false });
+      top += panelH + gap;
+    });
+
     Highcharts.setOptions({
       lang: {
         rangeSelectorZoom: "",
@@ -276,7 +319,11 @@
     applyDrawingColor(p);
 
     chart = Highcharts.stockChart("chart", {
-      chart: { backgroundColor: p.bg, height: args.height, animation: false, style: { fontFamily: "inherit" } },
+      chart: {
+        backgroundColor: p.bg, height: args.height, animation: false, style: { fontFamily: "inherit" },
+        panning: { enabled: true, type: "x" },
+        zooming: { mouseWheel: { enabled: true, type: "x", sensitivity: 1.2 } },
+      },
       credits: { enabled: false },
       navigation: { iconsURL: ICONS },
       stockTools: {
@@ -304,11 +351,9 @@
       legend: { enabled: true, itemStyle: { color: p.text, fontWeight: "normal" }, itemHoverStyle: { color: p.text }, itemHiddenStyle: { color: p.line } },
       navigator: { maskFill: "rgba(37,99,235,0.15)", outlineColor: p.line, xAxis: { gridLineColor: p.grid, labels: label }, series: { color: BLUE, lineColor: BLUE } },
       scrollbar: { enabled: false },
-      xAxis: { plotBands: templateBands(), lineColor: p.line, tickColor: p.line, labels: label, crosshair: { color: p.line } },
-      yAxis: [
-        { height: "76%", labels: Object.assign({ align: "left", x: 6 }, label), gridLineColor: p.grid, resize: { enabled: true, lineColor: p.line }, crosshair: { color: p.line, snap: false } },
-        { top: "79%", height: "21%", labels: Object.assign({ align: "left", x: 6 }, label), gridLineColor: p.grid },
-      ],
+      // overscroll: tomrom til høyre for siste kurs, så du kan panorere frem i tid og tegne der.
+      xAxis: { plotBands: templateBands(), overscroll: OVERSCROLL, lineColor: p.line, tickColor: p.line, labels: label, crosshair: { color: p.line } },
+      yAxis: yAxes,
       tooltip: {
         // Fast boks øverst til venstre i grafen, så den ikke dekker lyset eller tegningene.
         fixed: true, shared: true, split: false, useHTML: true, shadow: false, borderRadius: 6,
@@ -425,6 +470,37 @@
   document.addEventListener("touchstart", function () { mouseDown = true; }, true);
   document.addEventListener("touchend", function () { mouseDown = false; }, true);
   setInterval(autosave, 700);
+
+  // Dra i datoaksen (under plottet) for å strekke/presse sammen stolpene. Høyre kant holdes fast,
+  // som i TradingView: dra mot venstre = tettere, mot høyre = bredere.
+  let axisDrag = null;
+  function inXAxisArea(event) {
+    if (!chart) { return false; }
+    const rect = chart.container.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    const bottom = chart.plotTop + chart.plotHeight;
+    const axisHeight = chart.navigator && chart.navigator.top ? Math.max(8, chart.navigator.top - bottom - 6) : 28;
+    return x >= chart.plotLeft && x <= chart.plotLeft + chart.plotWidth && y > bottom && y < bottom + axisHeight;
+  }
+  chartEl.addEventListener("mousemove", function (event) {
+    if (axisDrag) { return; }
+    chartEl.classList.toggle("axis-drag", inXAxisArea(event));
+  });
+  chartEl.addEventListener("mousedown", function (event) {
+    if (event.button !== 0 || !inXAxisArea(event)) { return; }
+    const axis = chart.xAxis[0];
+    const ext = axis.getExtremes();
+    axisDrag = { startX: event.clientX, min: ext.min, max: ext.max, dataMin: ext.dataMin };
+    event.stopPropagation(); event.preventDefault();
+  }, true);
+  window.addEventListener("mousemove", function (event) {
+    if (!axisDrag) { return; }
+    const factor = Math.exp(-(event.clientX - axisDrag.startX) / 250);
+    const range = Math.max(10 * 24 * 3600 * 1000, (axisDrag.max - axisDrag.min) * factor);
+    const min = Math.max(axisDrag.dataMin, axisDrag.max - range);
+    chart.xAxis[0].setExtremes(min, axisDrag.max, true, false);
+  });
+  window.addEventListener("mouseup", function () { if (axisDrag) { axisDrag = null; chartEl.classList.remove("axis-drag"); } });
 
   window.addEventListener("message", function (event) {
     if (event.data && event.data.type === "streamlit:render") { onRender(event); }

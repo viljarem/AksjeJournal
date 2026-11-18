@@ -165,12 +165,25 @@ def save_chart_smas(smas: list) -> None:
     save_drawings(_SMA_ROW, smas)
 
 
+_INDICATOR_ROW = "__indicators__"
+
+
+def get_chart_indicators() -> dict | None:
+    """Lagret indikatoroppsett (Bollinger, RSI, ATR), eller None hvis ingenting er lagret."""
+    rows = _table("chart_drawings").select("annotations").eq("ticker", _INDICATOR_ROW).execute().data
+    return rows[0]["annotations"] if rows else None
+
+
+def save_chart_indicators(indicators: dict) -> None:
+    save_drawings(_INDICATOR_ROW, indicators)
+
+
 def get_drawings(ticker: str) -> list:
     rows = _table("chart_drawings").select("annotations").eq("ticker", ticker).execute().data
     return rows[0]["annotations"] if rows else []
 
 
-def save_drawings(ticker: str, annotations: list) -> None:
+def save_drawings(ticker: str, annotations: list | dict) -> None:
     _table("chart_drawings").upsert(
         {
             "ticker": ticker,
