@@ -113,6 +113,29 @@
     drawingSlots.forEach(function (slot) { slot[0][slot[1]] = slot[1] === "fill" ? fill : color; });
   }
 
+  // Måleverktøyet (linjalen) viser prosentavstand og antall stolper i stedet for min/maks/snitt.
+  function measureLabel(target) {
+    const type = (target.options.typeOptions || {}).selectType || "xy";
+    const lo = Math.min(target.yAxisMin, target.yAxisMax), hi = Math.max(target.yAxisMin, target.yAxisMax);
+    const x0 = Math.min(target.xAxisMin, target.xAxisMax), x1 = Math.max(target.xAxisMin, target.xAxisMax);
+    const lines = [];
+    if (type !== "x" && lo > 0) {
+      lines.push(num(lo, 2) + " → " + num(hi, 2) + ": +" + num((hi / lo - 1) * 100, 1) + " %  (−" + num((1 - lo / hi) * 100, 1) + " % ned)");
+    }
+    if (type !== "y") {
+      const price = target.chart.get("price");
+      const bars = price ? price.options.data.filter(function (d) { return d[0] >= x0 && d[0] <= x1; }).length : 0;
+      lines.push(bars + " stolper · " + Math.round((x1 - x0) / 86400000) + " dager");
+    }
+    return lines.join("<br>");
+  }
+  (function () {
+    const types = Highcharts.getOptions().annotations.types;
+    if (types && types.measure && types.measure.typeOptions && types.measure.typeOptions.label) {
+      types.measure.typeOptions.label.formatter = measureLabel;
+    }
+  })();
+
   function buildChart(args, theme) {
     const p = palette(theme);
     const root = document.documentElement;
